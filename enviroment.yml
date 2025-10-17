@@ -1,0 +1,22 @@
+# environment.yml
+name: movielens-mcrs
+channels: [conda-forge, pytorch]
+dependencies:
+  - python=3.10
+  - numpy=1.26.4
+  - pandas
+  - scikit-learn=1.4.*
+  - matplotlib
+  - seaborn
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pip
+  - pip:
+      - scikit-surprise
+      - lightfm
+      - implicit
+      - plotly
+      - streamlit
+      - tqdm
+      - jupyterlab
