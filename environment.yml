@@ -1,0 +1,46 @@
+name: movielens-mcrs
+channels:
+  - conda-forge          # 放最前，避免與 defaults 混用衝突
+  - pytorch
+  - defaults
+
+dependencies:
+  # --- Core Python environment ---
+  - python=3.10
+  - pip
+  - openjdk=17           # 會安裝到 $CONDA_PREFIX/lib/jvm (macOS/conda-forge)
+  - numpy=1.26.4
+  - pandas
+  - scikit-learn=1.4.*
+  - matplotlib
+  - seaborn
+  - tqdm
+
+  # --- Deep Learning (for NCF / AutoEncoder) ---
+  - pytorch
+  - torchvision
+  - torchaudio
+
+  # --- PySpark for large-scale MF / ALS ---
+  - pyspark=3.5.*        # 內含 Spark runtime，不需另裝 brew spark
+
+  # --- IO/Columnar ---
+  - pyarrow              # 由 conda-forge 解析，與 pandas 相容
+  - fastparquet
+
+  # --- Visualization & App ---
+  - plotly
+  - streamlit
+
+  # --- Notebook / Utilities ---
+  - jupyter
+  - jupyterlab
+  - notebook
+  - findspark
+  - kaggle
+
+  # --- Pip-only packages (recsys 傳統/implicit/Hybrid) ---
+  - pip:
+      - scikit-surprise
+      - implicit
+      - lightfm
