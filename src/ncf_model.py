@@ -232,7 +232,7 @@ def recommend_topk(
     train_seen: Mapping[int, set[int]] | None = None,
     k: int = 10,
     device: torch.device | str | None = None,
-) -> list[int]:
+) -> pd.DataFrame:
     """Recommend top-k unseen items for a raw user id."""
 
     if user_id not in user2idx:
@@ -264,7 +264,7 @@ def recommend_topk(
         scores = model(user_tensor, candidate_indices).detach().cpu().numpy()
 
     topk_idx = np.argsort(-scores)[:k]
-    return candidates[topk_idx].tolist()
+    return pd.DataFrame({'movieId': candidates[topk_idx]})
 
 
 __all__ = [

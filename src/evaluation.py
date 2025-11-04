@@ -11,8 +11,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from .ncf_model import recommend_topk as _recommend_topk_ncf
-from .autoencoder_model import recommend_topk as _recommend_topk_autoencoder_df
+from ncf_model import recommend_topk as _recommend_topk_ncf
+from autoencoder_model import recommend_topk as _recommend_topk_autoencoder_df
 
 
 @dataclass
