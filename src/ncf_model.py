@@ -156,14 +156,17 @@ def encode_splits(
 class RatingsDataset(Dataset):
     """PyTorch dataset wrapping encoded user/item interactions."""
 
+    # Transform datafram to pytorch tensor
     def __init__(self, df: pd.DataFrame) -> None:
         self.users = torch.tensor(df["user_idx"].values, dtype=torch.long)
         self.items = torch.tensor(df["item_idx"].values, dtype=torch.long)
         self.ratings = torch.tensor(df["rating"].values, dtype=torch.float32)
 
+    # return length for Dataloder
     def __len__(self) -> int:
         return len(self.users)
 
+    # Get items for Dataloader to build batch
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return self.users[idx], self.items[idx], self.ratings[idx]
 
@@ -183,7 +186,9 @@ def run_epoch(
     else:
         device = torch.device(device)
 
+    # Set model mode
     model.train() if is_train else model.eval()
+    # Prepare tracking variables, These lists store the loss values, ground truth ratings, and predictions for later metric computation (RMSE/MAE).
     losses: list[float] = []
     true_batches: list[np.ndarray] = []
     pred_batches: list[np.ndarray] = []
@@ -201,11 +206,13 @@ def run_epoch(
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-
+            
+            # Store results
             losses.append(loss.item())
             true_batches.append(ratings.detach().cpu().numpy())
             pred_batches.append(preds.detach().cpu().numpy())
 
+    # Compute metrics
     y_true = np.concatenate(true_batches)
     y_pred = np.concatenate(pred_batches)
     rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
@@ -219,7 +226,10 @@ def build_seen_items(
     item_col: str = "movieId",
 ) -> dict[int, set[int]]:
     """Create a mapping of users to the set of items they have interacted with."""
-
+    """ {
+            1: {10, 20},
+            2: {10, 30}
+        } """
     grouped = train_df.groupby(user_col)[item_col].apply(set)
     return {int(user): set(items) for user, items in grouped.items()}
 
