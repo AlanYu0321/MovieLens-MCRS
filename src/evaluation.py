@@ -174,10 +174,10 @@ def recommend_topk_ncf_ids(
     train_seen: Mapping[int, set[int]] | None = None,
     k: int = 10,
     device: torch.device | str | None = None,
-) -> list[int]:
+) -> pd.DataFrame | list[int]:
     """Convenience wrapper returning NCF top-k recommendations as raw ids."""
 
-    return _recommend_topk_ncf(
+    df = _recommend_topk_ncf(
         model,
         user_id,
         user2idx,
@@ -186,6 +186,8 @@ def recommend_topk_ncf_ids(
         k=k,
         device=device,
     )
+
+    return df["movieId"].tolist() if not df.empty else []
 
 
 def recommend_topk_autoencoder_ids(
