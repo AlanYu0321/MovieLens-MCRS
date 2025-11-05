@@ -88,6 +88,7 @@ def filter_cold_start(
 ) -> pd.DataFrame:
     """Remove users/movies with too-few interactions (iterative until stable)."""
     logger.info(f"Filtering cold-start users (<{min_user_ratings}) and movies (<{min_movie_ratings})")
+    # Make sure while loop continue.
     prev_shape = (-1, -1)
     while df.shape != prev_shape:
         prev_shape = df.shape
@@ -115,8 +116,8 @@ def encode_genres_multihot(movies: pd.DataFrame) -> Tuple[pd.DataFrame, List[str
     genre_cols = sorted(unique)
     out = movies.copy()
     for g in genre_cols:
-        out[f"genre_{g}"] = movies["genres"].str.contains(fr"\b{g}\b", regex=True).astype("int8")
-    return out, [f"genre_{g}" for g in genre_cols]
+        out[f"{g}"] = movies["genres"].str.contains(fr"\b{g}\b", regex=True).astype("int8")
+    return out, [f"{g}" for g in genre_cols]
 
 # ---------- Splits ----------
 def train_valid_test_split_by_time(
@@ -124,8 +125,7 @@ def train_valid_test_split_by_time(
     valid_ratio: float = 0.1,
     test_ratio: float = 0.1,
     by_user: bool = True,
-    timestamp_col: str = "datetime",
-    seed: int = 42
+    timestamp_col: str = "datetime"
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Time-aware split. If by_user=True, split within each user by chronological order.
@@ -138,9 +138,9 @@ def train_valid_test_split_by_time(
             n = len(g)
             n_test = max(1, int(n * test_ratio))
             n_valid = max(1, int(n * valid_ratio))
-            test = g.tail(n_test)
-            valid = g.iloc[-(n_test + n_valid):-n_test] if n - (n_test + n_valid) >= 1 else g.iloc[:0]
-            train = g.iloc[: n - (len(valid) + len(test))]
+            test = g.tail(n_test) # Earliest interactions
+            valid = g.iloc[-(n_test + n_valid):-n_test] if n - (n_test + n_valid) >= 1 else g.iloc[:0] # Middle interactions
+            train = g.iloc[: n - (len(valid) + len(test))] # Latest interactions
             parts.append((train, valid, test))
         train = pd.concat([p[0] for p in parts], ignore_index=True)
         valid = pd.concat([p[1] for p in parts], ignore_index=True)
