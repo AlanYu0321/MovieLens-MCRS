@@ -160,7 +160,7 @@ def recommend_top_k(
         return []
     predictions = [(iid, algo.predict(user_id, iid).est) for iid in candidates]
     predictions.sort(key=lambda x: x[1], reverse=True)
-    return [iid for iid, _ in predictions[:k]]
+    return predictions[:k]
 
 
 def precision_recall_at_k(

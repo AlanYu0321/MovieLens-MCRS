@@ -274,7 +274,7 @@ def recommend_topk(
         scores = model(user_tensor, candidate_indices).detach().cpu().numpy()
 
     topk_idx = np.argsort(-scores)[:k]
-    return pd.DataFrame({'movieId': candidates[topk_idx]})
+    return pd.DataFrame({'movieId': candidates[topk_idx], "pred_rating": scores[topk_idx]})
 
 
 __all__ = [
