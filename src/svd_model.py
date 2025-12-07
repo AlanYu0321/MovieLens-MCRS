@@ -205,7 +205,13 @@ def precision_recall_at_k(
             precisions.append(0.0)
             recalls.append(0.0)
             continue
-        hit_count = len(set(recs) & positives)
+
+        if recs and isinstance(recs[0], (tuple, list)):
+            rec_ids = [item[0] for item in recs]
+        else:
+            rec_ids = list(recs)
+
+        hit_count = len(set(rec_ids) & positives)
         precisions.append(hit_count / k)
         recalls.append(hit_count / len(positives))
 
