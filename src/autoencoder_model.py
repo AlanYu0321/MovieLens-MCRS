@@ -65,7 +65,7 @@ class DenoisingAutoEncoder(nn.Module):
                 nn.init.xavier_uniform_(module.weight)
                 nn.init.zeros_(module.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         latent = self.encoder(x)
         return self.decoder(latent)
 
