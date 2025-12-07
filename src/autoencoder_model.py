@@ -265,9 +265,7 @@ def recommend_topk(
     user_vector = torch.from_numpy(train_matrix[user_idx]).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        # 原始輸出（不 clamp）— 用來排序
         recon_raw = model(user_vector).squeeze(0).cpu().numpy()
-        # 用於顯示 / 評估的版本 — clamp 在合法 rating 區間
         recon_clipped = np.clip(recon_raw, min_rating, max_rating)
 
     seen = train_seen.get(user_id, set()) if train_seen is not None else set()
@@ -279,7 +277,6 @@ def recommend_topk(
     if candidates.size == 0:
         return pd.DataFrame(columns=["movieId", "pred_rating"])
 
-    # 排序用原始分數，避免一堆都被壓成 5.0 時排序資訊消失
     raw_scores = recon_raw[item_series.loc[candidates].to_numpy()]
     clipped_scores = recon_clipped[item_series.loc[candidates].to_numpy()]
 
@@ -288,8 +285,8 @@ def recommend_topk(
     df = pd.DataFrame(
         {
             "movieId": candidates[order],
-            "pred_rating": clipped_scores[order],   # 顯示還是用合法區間
-            "raw_score": raw_scores[order],         # 如果你想看原始值，可以留著
+            "pred_rating": clipped_scores[order],
+            "raw_score": raw_scores[order],
         }
     )
     df["pred_rating"] = df["pred_rating"].round(3)
