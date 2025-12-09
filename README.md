@@ -88,8 +88,9 @@ Aggregated metrics from `reports/results.csv` (test split, `k=10`):
 
 | Model | RMSE ↓ | MAE ↓ | Precision@10 ↑ | Recall@10 ↑ | nDCG@10 ↑ |
 | --- | --- | --- | --- | --- | --- |
-| NCF | 0.894 | 0.692 | 0.032 | 0.042 | 0.041 |
-| AutoEncoder | 1.744 | 1.385 | 0.028 | 0.025 | 0.032 |
+| SVD | 0.867 | 0.662 | 0.037 | 0.044 | 0.050 |
+| NCF | 0.886 | 1.385 | 0.029 | 0.038 | 0.042 |
+| AutoEncoder | 1.716 | 1.363 | 0.039 | 0.052 | 0.056 |
 
 Additional metrics for classical baselines are discussed inside the corresponding
 notebooks. Use `06_evaluation.ipynb` to recompute the comparison after retraining.
