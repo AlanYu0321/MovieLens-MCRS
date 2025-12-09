@@ -3,19 +3,27 @@
 from __future__ import annotations
 
 import sys
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import streamlit as st
-import torch
+from surprise import dump
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.ncf_model import load_ncf_checkpoint
+from src.autoencoder_model import (
+    encode_dense_splits,
+    load_autoencoder_checkpoint,
+    recommend_topk as recommend_topk_autoencoder,
+)
+from src.ncf_model import (
+    load_ncf_checkpoint,
+    recommend_topk as recommend_topk_ncf,
+)
+from src.svd_model import recommend_top_k as recommend_topk_svd
 
 st.set_page_config(
     page_title="MovieLens Recommender Dashboard",
@@ -67,40 +75,6 @@ def load_active_users() -> pd.DataFrame:
     return pd.read_csv(ROOT / "reports" / "active_users.csv")
 
 
-@lru_cache(maxsize=1)
-def build_encoders() -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
-    train = load_split("train")
-    valid = load_split("valid")
-    test = load_split("test")
-
-    all_users = pd.Index(
-        pd.concat([train["userId"], valid["userId"], test["userId"]]).unique()
-    )
-    all_items = pd.Index(
-        pd.concat([train["movieId"], valid["movieId"], test["movieId"]]).unique()
-    )
-
-    user2idx = pd.Series(np.arange(len(all_users), dtype=np.int64), index=all_users)
-    idx2user = pd.Series(all_users.values, index=user2idx.values)
-    item2idx = pd.Series(np.arange(len(all_items), dtype=np.int64), index=all_items)
-    idx2item = pd.Series(all_items.values, index=item2idx.values)
-    return user2idx, idx2user, item2idx, idx2item
-
-
-@st.cache_resource(show_spinner=False)
-def load_model() -> torch.nn.Module:
-    user2idx, _, item2idx, _ = build_encoders()
-    model_path = ROOT / "models" / "ncf_best.pth"
-    model = load_ncf_checkpoint(
-        checkpoint_path=model_path,
-        n_users=len(user2idx),
-        n_items=len(item2idx),
-        device="cpu",
-    )
-    model.eval()
-    return model
-
-
 def get_user_history(user_id: int, limit: int = 10) -> pd.DataFrame:
     ratings = load_all_ratings()
     movies = load_movies()[["movieId", "title", "genres"]]
@@ -111,44 +85,129 @@ def get_user_history(user_id: int, limit: int = 10) -> pd.DataFrame:
     return history.head(limit)
 
 
-def recommend_for_user(user_id: int, top_k: int = 10) -> pd.DataFrame:
-    user2idx, _, item2idx, idx2item = build_encoders()
-    if user_id not in user2idx.index:
-        raise ValueError(f"User {user_id} is not available in the encoded dataset.")
-
-    model = load_model()
-    device = next(model.parameters()).device
-
-    user_idx = int(user2idx.loc[user_id])
-    items_tensor = torch.arange(len(item2idx), dtype=torch.long, device=device)
-    user_tensor = torch.full_like(items_tensor, fill_value=user_idx)
-
-    with torch.no_grad():
-        scores = model(user_tensor, items_tensor).detach().cpu().numpy()
-
-    recs = pd.DataFrame(
-        {
-            "movie_idx": np.arange(len(scores), dtype=np.int64),
-            "pred_rating": scores,
-        }
-    )
-    recs["movieId"] = recs["movie_idx"].map(idx2item)
-
-    watched = load_all_ratings()
-    watched = set(watched.loc[watched["userId"] == user_id, "movieId"].tolist())
-    recs = recs[~recs["movieId"].isin(watched)]
-
+@st.cache_resource(show_spinner=False)
+def load_recommender_interfaces() -> dict[str, callable]:
+    train = load_split("train")
+    valid = load_split("valid")
+    test = load_split("test")
     movies = load_movies()[["movieId", "title", "genres"]]
-    recs = recs.merge(movies, on="movieId", how="left")
-    recs = recs.sort_values("pred_rating", ascending=False).head(top_k)
-    recs["pred_rating"] = recs["pred_rating"].round(3)
-    return recs[["movieId", "title", "genres", "pred_rating"]]
+
+    (
+        train_matrix,
+        _,
+        _,
+        _,
+        _,
+        _,
+        user2idx,
+        item2idx,
+    ) = encode_dense_splits(train, valid, test)
+
+    user2idx = pd.Series(user2idx)
+    item2idx = pd.Series(item2idx)
+
+    train_seen = train.groupby("userId")["movieId"].apply(set).to_dict()
+    all_items = train["movieId"].unique()
+    empty_df = pd.DataFrame(columns=["movieId", "title", "genres", "pred_rating"])
+
+    def format_recommendations(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return empty_df.copy()
+        merged = df.merge(movies, on="movieId", how="left")
+        if "pred_rating" in merged.columns:
+            merged["pred_rating"] = merged["pred_rating"].round(3)
+        else:
+            merged["pred_rating"] = np.nan
+        return merged[["movieId", "title", "genres", "pred_rating"]]
+
+    ncf_model = load_ncf_checkpoint(
+        checkpoint_path=ROOT / "models" / "ncf_best.pth",
+        n_users=len(user2idx),
+        n_items=len(item2idx),
+        device="cpu",
+    )
+
+    def recommend_ncf(user_id: int, top_k: int = 10) -> pd.DataFrame:
+        if user_id not in user2idx.index:
+            raise ValueError(f"User {user_id} is not available in the dataset.")
+        recs = recommend_topk_ncf(
+            ncf_model,
+            user_id,
+            user2idx=user2idx,
+            item2idx=item2idx,
+            train_seen=train_seen,
+            k=top_k,
+            device="cpu",
+        )
+        if isinstance(recs, list):
+            recs = pd.DataFrame(recs, columns=["movieId", "pred_rating"])
+        return format_recommendations(recs)
+
+    ae_model, _ = load_autoencoder_checkpoint(
+        ROOT / "models" / "autoencoder_best.pth",
+        n_items=len(item2idx),
+        device="cpu",
+    )
+
+    def recommend_autoencoder(user_id: int, top_k: int = 10) -> pd.DataFrame:
+        if user_id not in user2idx.index:
+            raise ValueError(f"User {user_id} is not available in the dataset.")
+        recs = recommend_topk_autoencoder(
+            ae_model,
+            user_id,
+            train_matrix=train_matrix,
+            user2idx=user2idx,
+            item2idx=item2idx,
+            train_seen=train_seen,
+            k=top_k,
+            device="cpu",
+        )
+        if isinstance(recs, list):
+            recs = pd.DataFrame(recs, columns=["movieId", "pred_rating"])
+        return format_recommendations(recs)
+
+    svd_path = ROOT / "models" / "svd_baseline.dump"
+    svd_algo = None
+    if svd_path.exists():
+        _, svd_algo = dump.load(str(svd_path))
+
+    def recommend_svd(user_id: int, top_k: int = 10) -> pd.DataFrame:
+        if svd_algo is None:
+            return empty_df.copy()
+        recs = recommend_topk_svd(
+            svd_algo,
+            user_id,
+            train_df=train,
+            k=top_k,
+            user_items_cache=train_seen,
+            all_items=all_items,
+        )
+        if not recs:
+            return empty_df.copy()
+        df = pd.DataFrame(recs, columns=["movieId", "pred_rating"])
+        return format_recommendations(df)
+
+    return {
+        "SVD": recommend_svd,
+        "NCF": recommend_ncf,
+        "AutoEncoder": recommend_autoencoder,
+    }
+
+
+def recommend_for_user(user_id: int, model_name: str, top_k: int = 10) -> pd.DataFrame:
+    recommenders = load_recommender_interfaces()
+    if model_name not in recommenders:
+        raise ValueError(f"Unknown model: {model_name}")
+    return recommenders[model_name](user_id, top_k)
 
 
 def render_overview_tab() -> None:
     st.subheader("Model Evaluation")
     results = load_results()
-    comparison = results[results["split"] == "test"].set_index("model")[
+    split_options = sorted(results["split"].unique())
+    default_index = split_options.index("test") if "test" in split_options else 0
+    selected_split = st.selectbox("Evaluation split", split_options, index=default_index)
+    comparison = results[results["split"] == selected_split].set_index("model")[
         ["rmse", "mae", "precision@10", "recall@10", "ndcg@10"]
     ]
     st.dataframe(comparison.style.format("{:.3f}"), use_container_width=True)
@@ -163,15 +222,17 @@ def render_overview_tab() -> None:
     display_model = "NCF" if "NCF" in comparison.index else comparison.index[0]
     metric_cols = st.columns(len(metric_names))
     for col, (metric_key, (label, help_text)) in zip(metric_cols, metric_names.items()):
-        value = comparison.loc[display_model, metric_key]
-        if metric_key in {"rmse", "mae"}:
+        is_lower_better = metric_key in {"rmse", "mae"}
+        if is_lower_better:
             best_model = comparison[metric_key].idxmin()
+            best_value = comparison.loc[best_model, metric_key]
         else:
             best_model = comparison[metric_key].idxmax()
+            best_value = comparison.loc[best_model, metric_key]
         col.metric(
             label,
-            f"{value:.3f}",
-            help=f"{help_text}. Best model: {best_model}.",
+            f"{best_value:.3f}",
+            help=f"{help_text}. Best model on {selected_split}: {best_model}.",
         )
 
     st.markdown("---")
@@ -201,19 +262,34 @@ def render_recommendations_tab() -> None:
     st.subheader("Personalized Recommendations")
     ratings = load_all_ratings()
     unique_users = sorted(ratings["userId"].unique().tolist())
-    selected_user = st.selectbox(
+    recommenders = load_recommender_interfaces()
+    model_names = list(recommenders.keys())
+    default_model_index = model_names.index("NCF") if "NCF" in model_names else 0
+
+    col1, col2, col3 = st.columns([2, 1, 1])
+    selected_user = col1.selectbox(
         "Choose a user profile",
         options=unique_users,
         format_func=lambda uid: f"User {uid}",
     )
-    top_k = st.slider(
+    top_k = col2.slider(
         "Number of movies to recommend", min_value=5, max_value=20, value=10
+    )
+    model_choice = col3.selectbox(
+        "Recommender",
+        options=model_names,
+        index=default_model_index,
     )
 
     try:
-        recommendations = recommend_for_user(selected_user, top_k=top_k)
-        st.markdown(f"##### Suggested movies for user {selected_user}")
-        st.dataframe(recommendations, hide_index=True, use_container_width=True)
+        recommendations = recommend_for_user(selected_user, model_choice, top_k=top_k)
+        st.markdown(
+            f"##### Suggested movies for user {selected_user} via {model_choice}"
+        )
+        if recommendations.empty:
+            st.info("No recommendations available for this user/model combination.")
+        else:
+            st.dataframe(recommendations, hide_index=True, use_container_width=True)
     except ValueError as err:
         st.error(str(err))
         return
@@ -234,7 +310,7 @@ def main() -> None:
     st.title("🎬 MovieLens Collaborative Recommender Dashboard")
     st.caption(
         "Explore model quality metrics, dataset insights, and personalized movie suggestions "
-        "powered by the Neural Collaborative Filtering model."
+        "powered by SVD, Neural Collaborative Filtering, and AutoEncoder recommenders."
     )
     overview_tab, recommender_tab = st.tabs(["Overview", "Recommendations"])
     with overview_tab:
